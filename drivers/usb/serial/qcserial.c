@@ -1,43 +1,18 @@
-Skip to content
-Search or jump to…
-Pull requests
-Issues
-Marketplace
-Explore
- 
-@ponljung 
-ponljung
-/
-linux
-Public
-forked from boundarydevices/linux
-Code
-Pull requests
-Actions
-Projects
-Wiki
-Security
-Insights
-Settings
-linux/drivers/usb/serial/usb_wwan.c
-@telelaci
-telelaci Add support for Huawei MU609 USB modem
-…
-Latest commit 1131e3f on Jan 10, 2015
- History
- 14 contributors
-@jhovold@gregkh@torvalds@JinXiao-Intel@bmork@AlanStern@rustyrussell@PeterHuewe@peterhurley@telelaci@JoePerches@dcbw
-741 lines (614 sloc)  18 KB
-
 /*
   USB Driver layer for GSM modems
+
   Copyright (C) 2005  Matthias Urlichs <smurf@smurf.noris.de>
+
   This driver is free software; you can redistribute it and/or modify
   it under the terms of Version 2 of the GNU General Public License as
   published by the Free Software Foundation.
+
   Portions copied from the Keyspan driver by Hugh Blemings <hugh@blemings.org>
+
   History: see the git log.
+
   Work sponsored by: Sigos GmbH, Germany <info@sigos.de>
+
   This driver exists because the "normal" serial driver doesn't work too well
   with GSM modems. Issues:
   - data loss -- one single Receive URB is not nearly enough
@@ -764,18 +739,3 @@ EXPORT_SYMBOL(usb_wwan_resume);
 MODULE_AUTHOR(DRIVER_AUTHOR);
 MODULE_DESCRIPTION(DRIVER_DESC);
 MODULE_LICENSE("GPL");
-Footer
-© 2022 GitHub, Inc.
-Footer navigation
-Terms
-Privacy
-Security
-Status
-Docs
-Contact GitHub
-Pricing
-API
-Training
-Blog
-About
-linux/usb_wwan.c at boundary-imx_4.9.x_1.0.0_ga · ponljung/linux
