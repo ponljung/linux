@@ -1,8 +1,11 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
   USB Driver layer for GSM modems
 
   Copyright (C) 2005  Matthias Urlichs <smurf@smurf.noris.de>
+
+  This driver is free software; you can redistribute it and/or modify
+  it under the terms of Version 2 of the GNU General Public License as
+  published by the Free Software Foundation.
 
   Portions copied from the Keyspan driver by Hugh Blemings <hugh@blemings.org>
 
@@ -31,7 +34,6 @@
 #include <linux/usb.h>
 #include <linux/usb/serial.h>
 #include <linux/serial.h>
-#include <linux/version.h>
 #include "usb-wwan.h"
 
 /*
@@ -138,6 +140,9 @@ static int get_serial_info(struct usb_serial_port *port,
 {
 	struct serial_struct tmp;
 
+	if (!retinfo)
+		return -EFAULT;
+
 	memset(&tmp, 0, sizeof(tmp));
 	tmp.line            = port->minor;
 	tmp.port            = port->port_number;
@@ -215,6 +220,7 @@ int usb_wwan_write(struct tty_struct *tty, struct usb_serial_port *port,
 	int i;
 	int left, todo;
 	struct urb *this_urb = NULL;	/* spurious */
+	struct usb_host_endpoint *ep = NULL;
 	int err;
 	unsigned long flags;
 
@@ -250,6 +256,17 @@ int usb_wwan_write(struct tty_struct *tty, struct usb_serial_port *port,
 		/* send the data */
 		memcpy(this_urb->transfer_buffer, buf, todo);
 		this_urb->transfer_buffer_length = todo;
+
+		if ((HUAWEI_VENDOR_ID == port->serial->dev->descriptor.idVendor) &&
+		    (HW_BCDUSB != port->serial->dev->descriptor.bcdUSB)) {
+			ep = usb_pipe_endpoint(this_urb->dev, this_urb->pipe);
+			if (ep &&
+			    (0 != this_urb->transfer_buffer_length) &&
+			    (0 == this_urb->transfer_buffer_length %
+				ep->desc.wMaxPacketSize)) {
+				this_urb->transfer_flags |= URB_ZERO_PACKET;
+			}
+		}
 
 		spin_lock_irqsave(&intfdata->susp_lock, flags);
 		if (intfdata->suspended) {
@@ -327,7 +344,6 @@ static void usb_wwan_outdat_callback(struct urb *urb)
 	struct usb_serial_port *port;
 	struct usb_wwan_port_private *portdata;
 	struct usb_wwan_intf_private *intfdata;
-	unsigned long flags;
 	int i;
 
 	port = urb->context;
@@ -336,9 +352,9 @@ static void usb_wwan_outdat_callback(struct urb *urb)
 	usb_serial_port_softint(port);
 	usb_autopm_put_interface_async(port->serial->interface);
 	portdata = usb_get_serial_port_data(port);
-	spin_lock_irqsave(&intfdata->susp_lock, flags);
+	spin_lock(&intfdata->susp_lock);
 	intfdata->in_flight--;
-	spin_unlock_irqrestore(&intfdata->susp_lock, flags);
+	spin_unlock(&intfdata->susp_lock);
 
 	for (i = 0; i < N_OUT_URB; ++i) {
 		if (portdata->out_urbs[i] == urb) {
@@ -349,20 +365,12 @@ static void usb_wwan_outdat_callback(struct urb *urb)
 	}
 }
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,14,0)
-unsigned int usb_wwan_write_room(struct tty_struct *tty)
-#else
-int usb_wwan_write_room(struct tty_struct* tty)
-#endif 
+int usb_wwan_write_room(struct tty_struct *tty)
 {
 	struct usb_serial_port *port = tty->driver_data;
 	struct usb_wwan_port_private *portdata;
 	int i;
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,14,0)
-	unsigned int data_len = 0;
-#else 
 	int data_len = 0;
-#endif
 	struct urb *this_urb;
 
 	portdata = usb_get_serial_port_data(port);
@@ -373,30 +381,17 @@ int usb_wwan_write_room(struct tty_struct* tty)
 			data_len += OUT_BUFLEN;
 	}
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,14,0)
-	dev_dbg(&port->dev, "%s: %u\n", __func__, data_len);
-#else
 	dev_dbg(&port->dev, "%s: %d\n", __func__, data_len);
-#endif
-
 	return data_len;
 }
 EXPORT_SYMBOL(usb_wwan_write_room);
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,14,0)
-unsigned int usb_wwan_chars_in_buffer(struct tty_struct* tty)
-#else
 int usb_wwan_chars_in_buffer(struct tty_struct *tty)
-#endif
 {
 	struct usb_serial_port *port = tty->driver_data;
 	struct usb_wwan_port_private *portdata;
 	int i;
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,14,0)
 	int data_len = 0;
-#else
-	unsigned int data_len = 0;
-#endif
 	struct urb *this_urb;
 
 	portdata = usb_get_serial_port_data(port);
@@ -408,12 +403,7 @@ int usb_wwan_chars_in_buffer(struct tty_struct *tty)
 		if (this_urb && test_bit(i, &portdata->out_busy))
 			data_len += this_urb->transfer_buffer_length;
 	}
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,14,0)
 	dev_dbg(&port->dev, "%s: %d\n", __func__, data_len);
-#else
-	dev_dbg(&port->dev, "%s: %d\n", __func__, data_len);
-#endif
-
 	return data_len;
 }
 EXPORT_SYMBOL(usb_wwan_chars_in_buffer);
@@ -517,7 +507,6 @@ static struct urb *usb_wwan_setup_urb(struct usb_serial_port *port,
 				      void (*callback) (struct urb *))
 {
 	struct usb_serial *serial = port->serial;
-	struct usb_wwan_intf_private *intfdata = usb_get_serial_data(serial);
 	struct urb *urb;
 
 	urb = usb_alloc_urb(0, GFP_KERNEL);	/* No ISO */
@@ -527,9 +516,6 @@ static struct urb *usb_wwan_setup_urb(struct usb_serial_port *port,
 	usb_fill_bulk_urb(urb, serial->dev,
 			  usb_sndbulkpipe(serial->dev, endpoint) | dir,
 			  buf, len, callback, ctx);
-
-	if (intfdata->use_zlp && dir == USB_DIR_OUT)
-		urb->transfer_flags |= URB_ZERO_PACKET;
 
 	return urb;
 }
@@ -596,11 +582,7 @@ bail_out_error:
 }
 EXPORT_SYMBOL_GPL(usb_wwan_port_probe);
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,12,0)
-void usb_wwan_port_remove(struct usb_serial_port* port)
-#else
 int usb_wwan_port_remove(struct usb_serial_port *port)
-#endif
 {
 	int i;
 	struct usb_wwan_port_private *portdata;
@@ -619,9 +601,7 @@ int usb_wwan_port_remove(struct usb_serial_port *port)
 
 	kfree(portdata);
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5,12,0)
 	return 0;
-#endif
 }
 EXPORT_SYMBOL(usb_wwan_port_remove);
 
@@ -714,13 +694,9 @@ int usb_wwan_resume(struct usb_serial *serial)
 	for (i = 0; i < serial->num_ports; i++) {
 		port = serial->port[i];
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,7,0)
 		if (!tty_port_initialized(&port->port))
 			continue;
-#else
-		if (!test_bit(ASYNCB_INITIALIZED, &port->port.flags))
-			continue;
-#endif
+
 		portdata = usb_get_serial_port_data(port);
 
 		if (port->interrupt_in_urb) {
@@ -762,5 +738,4 @@ EXPORT_SYMBOL(usb_wwan_resume);
 
 MODULE_AUTHOR(DRIVER_AUTHOR);
 MODULE_DESCRIPTION(DRIVER_DESC);
-MODULE_LICENSE("GPL v2");
-MODULE_VERSION("1.1.2203.1");
+MODULE_LICENSE("GPL");
