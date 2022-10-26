@@ -33,6 +33,17 @@ extern int usb_wwan_resume(struct usb_serial *serial);
 
 #define HUAWEI_VENDOR_ID	0x12D1
 #define HW_BCDUSB		0x0110
+
+struct usb_wwan_intf_private {
+	spinlock_t susp_lock;
+	unsigned int suspended:1;
+	unsigned int use_send_setup:1;
+	unsigned int use_zlp:1;
+
+	int in_flight;
+	unsigned int open_ports;
+	void *private;
+};
 struct usb_wwan_port_private {
 	/* Input endpoints and buffer for this port */
 	struct urb *in_urbs[N_IN_URB];
